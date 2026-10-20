@@ -8,6 +8,7 @@
   "homepage": "https://fiddler.ai",
   "repository": "https://github.com/fiddler-labs/fiddler-coding-agent-plugin",
   "license": "Apache-2.0",
+  "privacyPolicyUrl": "https://www.fiddler.ai/privacy-policy",
   "keywords": ["observability", "tracing", "opentelemetry", "fiddler", "otel", "coding-agent"],
   "userConfig": {
     "OTLP_URL": {

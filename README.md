@@ -144,6 +144,10 @@ To produce token counts and message history, the plugin reads the session transc
 
 The plugin keeps short-lived state in the data directory Claude Code provides for the plugin ([`CLAUDE_PLUGIN_DATA`](https://code.claude.com/docs/en/plugins-reference#environment-variables)), to link hook events into one trace. This state includes the current prompt and the inputs of tools that are still running. It is removed when the turn, tool call, or session ends, and leftover entries from interrupted sessions are swept automatically. It also writes a debug log, `plugin.log`, in the same directory. The log contains only IDs and counts, never content, identity, or tokens.
 
+### Privacy
+
+Fiddler handles the data it receives as described in the [Fiddler Privacy Policy](https://www.fiddler.ai/privacy-policy).
+
 ## Development
 
 For working on the plugin itself or testing via `--plugin-dir`:
