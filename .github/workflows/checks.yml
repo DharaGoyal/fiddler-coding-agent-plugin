@@ -98,27 +98,41 @@ jobs:
         with:
           version: v2.15.0
 
-  # Catch a stale checksums.txt at review time: build the release binaries with
-  # the pinned toolchain and compare against the committed file. The release
-  # workflow runs the same gate before publishing.
+  # When a PR changes checksums.txt, rebuild the release binaries with the pinned
+  # toolchain and confirm they match the committed file. main may lag behind Go
+  # changes between releases, so only run the comparison when checksums.txt
+  # changed; tag pushes are covered by the gate in release.yml.
   checksums:
     name: checksums up to date
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Did this PR change checksums.txt?
+        id: changed
+        run: |
+          if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- checksums.txt; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-go@v7
+        if: steps.changed.outputs.run == 'true'
         with:
           go-version-file: go.mod
           cache: true
-      - name: Require committed checksums.txt
-        run: test -f checksums.txt || { echo "::error::checksums.txt is missing; run 'make checksums' and commit it"; exit 1; }
       - name: Use the exact Go toolchain pinned in go.mod
+        if: steps.changed.outputs.run == 'true'
         run: echo "GOTOOLCHAIN=$(awk '/^toolchain /{print $2}' go.mod)" >> "$GITHUB_ENV"
       - name: Build a snapshot (no publish)
+        if: steps.changed.outputs.run == 'true'
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
           args: release --snapshot --clean
       - name: Verify committed checksums match a fresh build
+        if: steps.changed.outputs.run == 'true'
         run: diff -u <(LC_ALL=C sort -k2 checksums.txt) <(LC_ALL=C sort -k2 dist/checksums.txt)

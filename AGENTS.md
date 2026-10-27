@@ -22,17 +22,18 @@ When touching `cmd/`, `scripts/on-event.sh`, or `internal/otlp/export.go`, verif
 
 ## Version Sync
 
-Three values **must** agree on every release:
+These must line up on every release:
 
 | Source | Field |
 |---|---|
 | Git tag | `vX.Y.Z` |
 | `.claude-plugin/plugin.json` | `"version"` |
-| `.claude-plugin/marketplace.json` | plugin entry `"version"` |
+| `.claude-plugin/marketplace.json` | plugin entry `source.ref` / `source.sha` (pins the release commit) |
+| `checksums.txt` | SHA-256 of the release binaries, built with the pinned Go toolchain |
 
-**Bump `plugin.json` and `marketplace.json` first, commit, then tag.** The shim derives its binary download target from `plugin.json`'s version. If they drift, consumers silently pin to the wrong release binary.
+**Bump `plugin.json` and run `make checksums`, commit, then tag.** The shim derives its binary download target from `plugin.json`'s version and verifies the download against the committed `checksums.txt`. After the release smoke test passes, move the marketplace pin (`source.ref`/`source.sha`) to the tag commit in a separate PR so fresh installs get the new release.
 
-This is enforced by the version-guard step in `.github/workflows/release.yml`. If the tag does not match the manifests, the release fails before GoReleaser publishes.
+This is enforced by the version-guard step in `.github/workflows/release.yml`. If the tag does not match `plugin.json`, the release fails before GoReleaser publishes.
 
 ## Plugin Name
 
@@ -66,7 +67,7 @@ Source: `internal/config/config.go`.
 - **No `jq` dependency.** Reads `plugin.json` with `grep`/`sed`. Do not add a `jq` requirement.
 - **Reads no config or credential file.** Config reaches the binary only through the hook environment. Do not reintroduce sourcing `.env.local` (or any other file) from the shim.
 - The shim verifies the downloaded binary against `checksums.txt` committed in the repo (not the release), so the reviewed commit fixes which binary runs. Verification is **fail-closed** (integrity matters), but the overall hook still **fails open** (exit 0 if download fails).
-- **Regenerate the pins after build changes.** Changing the Go version/toolchain (`go.mod`) or build flags (`.goreleaser.yaml`) changes the binaries' hashes; run `make checksums` and commit the result, or the release checksum gate fails.
+- **Regenerate `checksums.txt` in the release bump PR, before tagging.** Users install the commit the marketplace entry pins (`sha`), not `main`, so `checksums.txt` on `main` may lag behind Go changes between releases. The release workflow refuses to publish if the built binaries don't match. After the release smoke test passes, move the marketplace pin to the tag commit in a separate PR.
 - Concurrent hook invocations (parallel tool calls) are handled via per-invocation staging directories and atomic `mv`. Do not introduce shared mutable state.
 - `FIDDLER_BINARY_SOURCE`: `release` (default) downloads from the public GitHub Release; `local` uses `bin/` from `make build`. Unknown values are rejected (no silent fallback to network download).
 - **`exec` must not break fail-open.** The shim sets `shopt -s execfail` and `set +e` right before `exec`, so a binary that can't start (wrong architecture, blocked by policy) falls through to `exit 0` instead of bash's 126. `test/shim` covers this.

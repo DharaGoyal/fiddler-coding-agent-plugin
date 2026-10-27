@@ -19,16 +19,14 @@ followed exactly.
 
 ### 1. Bump the version
 
-Edit both files on `main`:
+Edit `.claude-plugin/plugin.json` on `main`:
 
 | File | Field | Example |
 |---|---|---|
 | `.claude-plugin/plugin.json` | `"version"` | `"0.4.0"` |
-| `.claude-plugin/marketplace.json` | `plugins[0].version` | `"0.4.0"` |
 
-The `marketplace.json` version is technically optional (Claude Code uses
-`plugin.json`), but if it is present **it must match**. The version-guard
-checks this.
+`marketplace.json` carries no version — it pins the release commit (see
+[step 6](#6-pin-the-marketplace-to-the-new-release)), so it isn't changed here.
 
 ### 2. Commit the bump
 
@@ -37,9 +35,9 @@ and commit it alongside the version bump.
 
 ```bash
 git checkout main && git pull origin main
-# edit the two files
+# edit plugin.json
 make checksums
-git add .claude-plugin/plugin.json .claude-plugin/marketplace.json checksums.txt
+git add .claude-plugin/plugin.json checksums.txt
 git commit -m "chore(release): v0.4.0"
 git push origin main
 ```
@@ -63,9 +61,9 @@ Pushing the tag triggers `.github/workflows/release.yml`:
 
 1. **Checks job** — runs the full `checks.yml` suite (build, lint, test, and the
    checksums-up-to-date gate).
-2. **Version-guard step** — extracts the tag version, reads `plugin.json` and
-   `marketplace.json`, and fails with an `::error` annotation if any version
-   does not match. If this fails, see [Fixing version drift](#fixing-version-drift).
+2. **Version-guard step** — extracts the tag version, reads `plugin.json`, and
+   fails with an `::error` annotation if its version does not match the tag. If
+   this fails, see [Fixing version drift](#fixing-version-drift).
 3. **Checksum gate** — builds the release binaries with the pinned Go toolchain
    (a GoReleaser `--snapshot` build) and fails before publishing if they do not
    match the committed `checksums.txt`. Also fails if `checksums.txt` is missing.
@@ -114,14 +112,27 @@ gh release download v0.4.0 --repo fiddler-labs/fiddler-coding-agent-plugin \
 grep ' on-event-darwin-arm64$' checksums.txt | shasum -a 256 -c
 ```
 
+### 6. Pin the marketplace to the new release
+
+Fresh installs follow the commit pinned in `.claude-plugin/marketplace.json`
+(`source.ref`/`source.sha`), not `main`. After the release smoke test passes,
+open a PR that moves the pin to the new tag commit:
+
+```bash
+git rev-parse v0.4.0^{commit}   # the commit to pin
+```
+
+Set the entry's `ref` to `v0.4.0` and `sha` to that commit. Users stay on the
+previous release until this PR merges.
+
 ## Release candidates
 
 Use a release candidate to test a release, for example a platform change, on
 real GitHub release assets before users get it:
 
-1. On the feature branch (not `main`), set `plugin.json` and
-   `marketplace.json` to `0.8.0-rc.1`, run `make checksums`, commit the two
-   manifests and `checksums.txt`, and push the branch.
+1. On the feature branch (not `main`), set `plugin.json` to `0.8.0-rc.1`, run
+   `make checksums`, commit `plugin.json` and `checksums.txt`, and push the
+   branch.
 2. Tag that commit and push the tag:
 
    ```bash
@@ -134,7 +145,7 @@ real GitHub release assets before users get it:
    version in `plugin.json` on `main`.
 3. Check the release smoke job in that Release run. To try the release in
    Claude Code, check out the branch and run `make dev` (release mode).
-4. When it passes, set both manifests to `0.8.0`, merge, and follow the normal
+4. When it passes, set `plugin.json` to `0.8.0`, merge, and follow the normal
    release steps above.
 
 Treat a pushed tag as final: if `v0.8.0-rc.1` turns out broken, fix it on the
@@ -160,7 +171,7 @@ computes the local SHA-256, and refuses to install the binary if:
 
 The release workflow builds the binaries at the tag and fails before publishing
 if they do not match the committed `checksums.txt`, so a corrupted or tampered
-binary is never published or executed.
+binary is never executed by the shim.
 
 ## Binary download
 
@@ -186,11 +197,11 @@ version instead.
 git tag -d v0.4.0
 git push origin :refs/tags/v0.4.0
 
-# 2. Fix the version in plugin.json and/or marketplace.json
-#    (make them match the intended version)
+# 2. Fix the version in plugin.json
+#    (make it match the intended version)
 
 # 3. Commit and push
-git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
+git add .claude-plugin/plugin.json
 git commit -m "fix(release): align versions to 0.4.0"
 git push origin main
 
@@ -199,25 +210,27 @@ git tag v0.4.0
 git push origin v0.4.0
 ```
 
-GoReleaser is configured with `mode: replace`, so re-publishing to the same
-tag overwrites any partial release artifacts.
+GoReleaser is configured with `mode: replace`, which overwrites partial
+artifacts only **before** a release is published. Immutable releases are enabled
+on this repo, so once a release is published its assets can't be replaced — if a
+published release is broken, cut the next version instead.
 
 ## Common failure modes
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `::error::plugin.json version (X) does not match tag (Y)` | Forgot to bump `plugin.json` before tagging, or bumped to the wrong value. | Delete the tag, fix the version, re-tag (see above). |
-| `::error::marketplace.json version for '...' (X) does not match tag (Y)` | `marketplace.json` version is present but was not bumped. | Same fix — bump `marketplace.json` to match, re-tag. |
 | `::error::Tag 'vfoo' is not a valid v<semver> release tag` | Tag is not `v<semver>` (e.g. `vfoo`, `release-1`). | Delete the tag, create a proper `v<semver>` tag. |
 | Shim reports "no released binary available" | The release does not exist, neither `curl` nor `wget` is installed, or github.com is unreachable (proxy/firewall). | Verify the release exists (`gh release view` or the Releases page); check `curl -I https://github.com`. |
-| Shim reports "checksum mismatch" | Corrupted download, or `checksums.txt` is stale (Go toolchain or build flags changed without regenerating). | Re-download; if persistent, run `make checksums` and commit the result. With immutable releases, cut a new version rather than re-publishing. |
+| Shim reports "checksum mismatch" | Corrupted download, or the published release doesn't match the `checksums.txt` users installed. | Re-download. If it persists, don't regenerate `checksums.txt` on `main`; fix the build and cut a new release. |
 
 ## Version-sync reference
 
-The following locations must agree on the version at release time:
+Release-time locations:
 
 | Location | Field | Used by |
 |---|---|---|
 | Git tag | `v<semver>` | CI trigger; GoReleaser release name |
 | `.claude-plugin/plugin.json` | `"version"` | Shim binary download target; Claude Code update signal |
-| `.claude-plugin/marketplace.json` | `plugins[].version` | Marketplace listing (optional but must match if present) |
+| `.claude-plugin/marketplace.json` | plugin entry `source.ref` / `source.sha` | Pins the release commit fresh installs get (moved after each release) |
+| `checksums.txt` | SHA-256 of the release binaries | Shim verifies the downloaded binary |

@@ -37,6 +37,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
