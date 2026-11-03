@@ -8,7 +8,7 @@ Step-by-step release process for `fiddler-coding-agent-plugin`.
 - `gh` CLI installed and authenticated (`gh auth login`).
 - A clean, up-to-date `main` branch.
 
-## Release workflow: bump → commit → tag → publish
+## Release workflow: bump → commit → tag → publish → pin
 
 The version in `.claude-plugin/plugin.json` is the single source of truth.
 The shell shim (`scripts/on-event.sh`) reads it at runtime to derive which
@@ -19,23 +19,22 @@ followed exactly.
 
 ### 1. Bump the version
 
-Edit both files on `main`:
+Edit `.claude-plugin/plugin.json` on `main`:
 
 | File | Field | Example |
 |---|---|---|
 | `.claude-plugin/plugin.json` | `"version"` | `"0.4.0"` |
-| `.claude-plugin/marketplace.json` | `plugins[0].version` | `"0.4.0"` |
 
-The `marketplace.json` version is technically optional (Claude Code uses
-`plugin.json`), but if it is present **it must match**. The version-guard
-checks this.
+`marketplace.json` has no version. It pins the release commit fresh installs
+get, and you move it in [step 6](#6-pin-the-marketplace-to-the-new-release)
+after the release is out.
 
 ### 2. Commit the bump
 
 ```bash
 git checkout main && git pull origin main
-# edit the two files
-git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
+# edit plugin.json
+git add .claude-plugin/plugin.json
 git commit -m "chore(release): v0.4.0"
 git push origin main
 ```
@@ -58,9 +57,10 @@ Release run for it.
 Pushing the tag triggers `.github/workflows/release.yml`:
 
 1. **Checks job** — runs the full `checks.yml` suite (build, lint, test).
-2. **Version-guard step** — extracts the tag version, reads `plugin.json` and
-   `marketplace.json`, and fails with an `::error` annotation if any version
-   does not match. If this fails, see [Fixing version drift](#fixing-version-drift).
+2. **Version-guard step** — extracts the tag version, reads `plugin.json`, and
+   fails with an `::error` annotation if its version does not match the tag, or
+   if the `marketplace.json` entry sets a `version`. If this fails, see
+   [Fixing version drift](#fixing-version-drift).
 3. **GoReleaser** — builds `on-event-<os>-<arch>` binaries for
    `linux/darwin/windows × amd64/arm64` (Windows assets end in `.exe`),
    generates `checksums.txt` (SHA-256), and creates a GitHub Release at the
@@ -107,13 +107,30 @@ gh release download v0.4.0 --repo fiddler-labs/fiddler-coding-agent-plugin \
 grep ' on-event-darwin-arm64$' checksums.txt | shasum -a 256 -c
 ```
 
+### 6. Pin the marketplace to the new release
+
+Fresh installs and `claude plugin update` follow the commit pinned in
+`.claude-plugin/marketplace.json` (`source.sha`), not `main`. After the
+release smoke test passes, open a PR that moves the pin to the tag commit:
+
+```bash
+git rev-parse v0.4.0^{commit}   # the commit to pin
+```
+
+Set the entry's `ref` to `v0.4.0` and `sha` to that commit. Before merging,
+from the PR branch
+(`/plugin marketplace add fiddler-labs/fiddler-coding-agent-plugin#<branch>`),
+confirm that a fresh install works and that `claude plugin update` moves an
+existing install to the new version. Users stay on the previous release until
+this PR merges.
+
 ## Release candidates
 
 Use a release candidate to test a release, for example a platform change, on
 real GitHub release assets before users get it:
 
-1. On the feature branch (not `main`), set `plugin.json` and
-   `marketplace.json` to `0.8.0-rc.1`, commit, and push the branch.
+1. On the feature branch (not `main`), set `plugin.json` to `0.8.0-rc.1`,
+   commit, and push the branch.
 2. Tag that commit and push the tag:
 
    ```bash
@@ -123,10 +140,10 @@ real GitHub release assets before users get it:
 
    The version guard accepts the pre-release suffix, and GoReleaser publishes
    a GitHub pre-release. Installed plugins are unaffected: they follow the
-   version in `plugin.json` on `main`.
+   commit pinned in `marketplace.json`.
 3. Check the release smoke job in that Release run. To try the release in
    Claude Code, check out the branch and run `make dev` (release mode).
-4. When it passes, set both manifests to `0.8.0`, merge, and follow the normal
+4. When it passes, set `plugin.json` to `0.8.0`, merge, and follow the normal
    release steps above.
 
 Treat a pushed tag as final: if `v0.8.0-rc.1` turns out broken, fix it on the
@@ -160,9 +177,11 @@ The shim (`scripts/on-event.sh`) downloads release assets over HTTPS from
 using `curl` (or `wget` if curl is missing). Machines running the plugin need
 outbound HTTPS access to github.com and the release-asset host it redirects to.
 
-Publish the release immediately after merging a version bump: until
-`v<version>` exists, updated installs cannot download a binary (the hook fails
-open and sends no telemetry).
+Publish the release immediately after merging a version bump. The marketplace
+pin keeps fresh and updated installs on the previous release, but anything that
+loads `main` directly (a `--plugin-dir` checkout, or a directory listing that
+tracks `main`) can't download a binary until `v<version>` exists. The hook fails
+open and sends no telemetry.
 
 ## Fixing version drift
 
@@ -177,8 +196,8 @@ version instead.
 git tag -d v0.4.0
 git push origin :refs/tags/v0.4.0
 
-# 2. Fix the version in plugin.json and/or marketplace.json
-#    (make them match the intended version)
+# 2. Fix the version in plugin.json (make it match the intended version),
+#    and remove any "version" from the marketplace.json entry
 
 # 3. Commit and push
 git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
@@ -198,17 +217,17 @@ tag overwrites any partial release artifacts.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `::error::plugin.json version (X) does not match tag (Y)` | Forgot to bump `plugin.json` before tagging, or bumped to the wrong value. | Delete the tag, fix the version, re-tag (see above). |
-| `::error::marketplace.json version for '...' (X) does not match tag (Y)` | `marketplace.json` version is present but was not bumped. | Same fix — bump `marketplace.json` to match, re-tag. |
+| `::error::marketplace.json entry for '...' sets "version" (X)` | A `version` was added to the pinned marketplace entry. | Remove it, then delete and re-push the tag (see above). |
 | `::error::Tag 'vfoo' is not a valid v<semver> release tag` | Tag is not `v<semver>` (e.g. `vfoo`, `release-1`). | Delete the tag, create a proper `v<semver>` tag. |
 | Shim reports "no released binary available" | The release does not exist, neither `curl` nor `wget` is installed, or github.com is unreachable (proxy/firewall). | Verify the release exists (`gh release view` or the Releases page); check `curl -I https://github.com`. |
 | Shim reports "checksum mismatch" | Corrupted download or stale `checksums.txt`. | Re-download; if persistent, re-publish the release. |
 
 ## Version-sync reference
 
-The following locations must agree on the version at release time:
+Release-time locations:
 
 | Location | Field | Used by |
 |---|---|---|
 | Git tag | `v<semver>` | CI trigger; GoReleaser release name |
 | `.claude-plugin/plugin.json` | `"version"` | Shim binary download target; Claude Code update signal |
-| `.claude-plugin/marketplace.json` | `plugins[].version` | Marketplace listing (optional but must match if present) |
+| `.claude-plugin/marketplace.json` | plugin entry `source.ref` / `source.sha` | Pins the release commit fresh installs get (moved after each release) |
