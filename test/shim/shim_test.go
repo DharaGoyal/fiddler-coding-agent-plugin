@@ -7,9 +7,9 @@
 // covers what only shows up on a real OS: binary naming and the .exe suffix,
 // line endings, paths with spaces, and that every exit path stays 0.
 //
-// Release-mode download against a published GitHub release is opt-in: set
+// Tests that download from a published GitHub release are opt-in: set
 // FIDDLER_SHIM_RELEASE_TAG (for example v0.8.0-rc.1). See
-// .github/workflows/release-smoke.yml.
+// .github/workflows/release-smoke.yml, which runs every TestShim_Release* test.
 package shim
 
 import (
@@ -427,18 +427,14 @@ func TestShim_ReleaseDownload(t *testing.T) {
 }
 
 // Given a staged plugin with no checksums.txt, when a hook runs in release mode,
-// then the shim installs nothing, exits 0, and names the missing pin. Opt-in
-// like TestShim_ReleaseDownload.
+// then the shim exits 0 and names the missing pin without downloading anything:
+// it looks up the pin before any network call, so it never creates the cache
+// directory. Needs no network or published release, so it runs in every
+// `go test`. It does need curl or wget on bash's PATH, which the shim checks
+// for before the pin lookup.
 func TestShim_ReleaseNoPinnedChecksum(t *testing.T) {
-	tag := os.Getenv("FIDDLER_SHIM_RELEASE_TAG")
-	if tag == "" {
-		t.Skip("set FIDDLER_SHIM_RELEASE_TAG (e.g. v0.8.0-rc.1) to test a published release")
-	}
-	require.Regexp(t, `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`, tag, "FIDDLER_SHIM_RELEASE_TAG must be v<semver>")
 	bash := findBash(t)
 	root := stagePlugin(t)
-	version := strings.TrimPrefix(tag, "v")
-	setPluginVersion(t, root, version)
 	// Remove the pin so the shim has nothing to verify against.
 	_ = os.Remove(filepath.Join(root, "checksums.txt"))
 
@@ -450,8 +446,7 @@ func TestShim_ReleaseNoPinnedChecksum(t *testing.T) {
 	code, stderr := runShim(t, bash, root, env, "PostToolUse", "post_tool_use.json")
 	require.Equal(t, 0, code, "stderr: %s", stderr)
 	assert.Contains(t, stderr, "no pinned checksum")
-	cached := filepath.Join(data, "bin", "on-event-"+runtime.GOOS+"-"+runtime.GOARCH+"-"+version+exeSuffix)
-	assert.NoFileExists(t, cached, "no binary installed without a pinned checksum")
+	assert.NoDirExists(t, filepath.Join(data, "bin"), "nothing downloaded or installed without a pinned checksum")
 }
 
 // Given a staged checksums.txt whose entry for this asset is wrong, when a hook

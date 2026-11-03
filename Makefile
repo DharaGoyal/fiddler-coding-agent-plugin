@@ -4,6 +4,8 @@ BIN_DIR := bin
 
 # Release checksums: build every release target with the Go toolchain pinned in
 # go.mod so the output matches GoReleaser's, then hash it into checksums.txt.
+# GOAMD64=v1 and GOARM64=v8.0 are GoReleaser's defaults; setting them here keeps
+# a value exported in the developer's shell from changing the hashes.
 GO_TOOLCHAIN := $(shell awk '/^toolchain /{print $$2}' go.mod)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 PIN_DIR := dist-pin
@@ -42,7 +44,7 @@ checksums:
 	@rm -rf $(PIN_DIR) && mkdir -p $(PIN_DIR)
 	@for p in $(PLATFORMS); do \
 	  os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
-	  GOTOOLCHAIN=$(GO_TOOLCHAIN) CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
+	  GOTOOLCHAIN=$(GO_TOOLCHAIN) CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch GOAMD64=v1 GOARM64=v8.0 \
 	    go build -trimpath -buildvcs=false -ldflags "-s -w" \
 	    -o $(PIN_DIR)/on-event-$$os-$$arch$$ext ./cmd/on-event || exit 1; \
 	done

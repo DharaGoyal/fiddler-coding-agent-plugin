@@ -98,10 +98,11 @@ jobs:
         with:
           version: v2.15.0
 
-  # When a PR changes checksums.txt, rebuild the release binaries with the pinned
-  # toolchain and confirm they match the committed file. main may lag behind Go
-  # changes between releases, so only run the comparison when checksums.txt
-  # changed; tag pushes are covered by the gate in release.yml.
+  # When a PR changes checksums.txt or plugin.json's version, rebuild the release
+  # binaries with the pinned toolchain and confirm they match the committed file.
+  # main may lag behind Go changes between releases, so other PRs skip the
+  # comparison. A release bump PR that forgets `make checksums` fails here
+  # instead of at tag time; tag pushes are covered by the gate in release.yml.
   checksums:
     name: checksums up to date
     if: github.event_name == 'pull_request'
@@ -110,13 +111,24 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Did this PR change checksums.txt?
+      - name: Did this PR change checksums.txt or the plugin version?
         id: changed
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- checksums.txt; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
+          set -euo pipefail
+          base=$(git merge-base "origin/${BASE_REF}" HEAD)
+          base_version=$(git show "${base}:.claude-plugin/plugin.json" | jq -r .version)
+          head_version=$(jq -r .version .claude-plugin/plugin.json)
+          if ! git diff --quiet "$base" HEAD -- checksums.txt; then
+            echo "checksums.txt changed"
             echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$base_version" != "$head_version" ]; then
+            echo "plugin.json version changed: ${base_version} -> ${head_version}"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "neither checksums.txt nor the plugin version changed; skipping"
+            echo "run=false" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/setup-go@v7
         if: steps.changed.outputs.run == 'true'
