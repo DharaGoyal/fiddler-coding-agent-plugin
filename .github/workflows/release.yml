@@ -24,17 +24,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Verify tag matches plugin.json and marketplace.json
+      - name: Verify tag matches plugin.json
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
 
-          # The tag must be v<semver>. The shim derives its binary download
-          # target from plugin.json's version, and Claude Code uses that same
-          # version as the plugin's update signal, so the git tag, plugin.json,
-          # and the marketplace entry must all agree or consumers silently pin
-          # to the wrong release. Fail the release before GoReleaser publishes.
+          # The tag must be v<semver> and match plugin.json. The shim derives
+          # its binary download target from plugin.json's version, and Claude
+          # Code uses that same version as the plugin's update signal, so a
+          # mismatch pins consumers to the wrong release. Fail the release
+          # before GoReleaser publishes.
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Tag '$TAG' is not a valid v<semver> release tag"
             exit 1
@@ -47,17 +47,18 @@ jobs:
             exit 1
           fi
 
-          # The marketplace entry version is optional (plugin.json wins when it
-          # is omitted), but if present it must match too.
+          # The marketplace entry pins a release commit and must not set a
+          # version: plugin.json at the pinned commit decides it, and an entry
+          # version would be easy to bump by habit without moving the pin.
           MP_VERSION=$(jq -r --arg n "$PLUGIN_NAME" \
             '.plugins[] | select(.name == $n) | .version // empty' \
             .claude-plugin/marketplace.json)
-          if [[ -n "$MP_VERSION" && "$MP_VERSION" != "$VERSION" ]]; then
-            echo "::error::marketplace.json version for '$PLUGIN_NAME' ($MP_VERSION) does not match tag ($VERSION). Bump marketplace.json before tagging."
+          if [[ -n "$MP_VERSION" ]]; then
+            echo "::error::marketplace.json entry for '$PLUGIN_NAME' sets \"version\" ($MP_VERSION). Remove it: the entry pins a release commit, and plugin.json at that commit decides the version."
             exit 1
           fi
 
-          echo "Version guard passed: tag=$VERSION plugin.json=$PLUGIN_VERSION marketplace.json=${MP_VERSION:-<unset>}"
+          echo "Version guard passed: tag=$VERSION plugin.json=$PLUGIN_VERSION"
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod

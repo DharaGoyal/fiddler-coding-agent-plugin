@@ -28,12 +28,14 @@ These must line up on every release:
 |---|---|
 | Git tag | `vX.Y.Z` |
 | `.claude-plugin/plugin.json` | `"version"` |
-| `.claude-plugin/marketplace.json` | plugin entry `source.ref` / `source.sha` (pins the release commit) |
+| `.claude-plugin/marketplace.json` | plugin entry `source.ref` / `source.sha`, moved to the tag commit after the release |
 | `checksums.txt` | SHA-256 of the release binaries, built with the pinned Go toolchain |
 
-**Bump `plugin.json` and run `make checksums`, commit, then tag.** The shim derives its binary download target from `plugin.json`'s version and verifies the download against the committed `checksums.txt`. After the release smoke test passes, move the marketplace pin (`source.ref`/`source.sha`) to the tag commit in a separate PR so fresh installs get the new release.
+**Bump `plugin.json` and run `make checksums`, commit, then tag.** The shim derives its binary download target from `plugin.json`'s version and verifies the download against the committed `checksums.txt`. Claude Code uses the version as the update signal.
 
-This is enforced by the version-guard step in `.github/workflows/release.yml`. If the tag does not match `plugin.json`, the release fails before GoReleaser publishes.
+The marketplace entry pins a release commit (`source.sha`) and has no `version`; `plugin.json` at that commit decides it. Fresh installs and `claude plugin update` get nothing new until the pin moves. After the release smoke test passes, move `source.ref`/`source.sha` to the tag commit in a separate PR. Never pin a commit whose version has no published release: the shim would find no binary to download.
+
+The version-guard step in `.github/workflows/release.yml` fails the release before GoReleaser publishes if the tag does not match `plugin.json`, or if the marketplace entry sets a `version`. The checksum gate after it fails the release if the built binaries don't match the committed `checksums.txt`.
 
 ## Plugin Name
 

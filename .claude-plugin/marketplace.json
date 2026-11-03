@@ -8,9 +8,17 @@
   "plugins": [
     {
       "name": "fiddler-coding-agent-plugin",
-      "source": "./",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/fiddler-labs/fiddler-coding-agent-plugin.git",
+        "sha": "6b1c1794c1f72d424ae841ac0eb3ce14a25b54cf"
+      },
       "description": "OpenTelemetry observability for coding agent sessions.",
-      "version": "0.8.0"
+      "author": {
+        "name": "Fiddler AI"
+      },
+      "homepage": "https://fiddler.ai",
+      "license": "Apache-2.0"
     }
   ],
   "renames": {
