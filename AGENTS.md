@@ -91,7 +91,7 @@ make dev               # export .env.local, then claude --plugin-dir . (builds f
 
 CI (`.github/workflows/checks.yml`) runs `go mod verify`, `go build`, `go vet` and `go test` on `ubuntu-latest` and `macos-latest` (with `-race`) and on `windows-latest` (x64) and `windows-11-arm` (ARM64), plus `gofmt`, `bash -n` on the shim, and `golangci-lint v2` for both the host and `GOOS=windows`.
 
-`build & test` is a gate job that passes only when every `test (<os>)` job passes, so adding or removing a platform doesn't change which checks a merge waits on. Keep the job names `build & test` and `lint & format` stable; merges into `main` depend on them.
+`build & test` is a gate job that passes only when every `test (<os>)` job passes and `checksums up to date` passes or is skipped (it runs only on PRs that change `checksums.txt` or `plugin.json`'s version), so adding or removing a platform doesn't change which checks a merge waits on. Keep the job names `build & test` and `lint & format` stable; merges into `main` depend on them.
 
 `test/shim` runs the real `scripts/on-event.sh` through bash (Git Bash on Windows; never WSL's `bash.exe`) with a local build and a fake OTLP endpoint. It covers trace export, fail-open exits, an unstartable binary, that the shim picks this machine's binary from the real `uname` (the Windows ARM64 detection on `windows-11-arm`), and (on macOS/Linux, with a fake `uname`) the Windows x64/ARM64 binary names. `FIDDLER_SHIM_RELEASE_TAG=vX.Y.Z go test ./test/shim/` also tests downloading a published release; `release.yml` runs that on all four platforms after every release (`.github/workflows/release-smoke.yml`).
 

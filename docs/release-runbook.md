@@ -4,7 +4,8 @@ Step-by-step release process for `fiddler-coding-agent-plugin`.
 
 ## Prerequisites
 
-- Push / write access to `fiddler-labs/fiddler-coding-agent-plugin`.
+- A repository admin role on `fiddler-labs/fiddler-coding-agent-plugin`: only
+  admins can create tags, and new branches, in this repo.
 - `gh` CLI installed and authenticated (`gh auth login`).
 - A clean, up-to-date `main` branch.
 
@@ -19,7 +20,7 @@ followed exactly.
 
 ### 1. Bump the version
 
-Edit `.claude-plugin/plugin.json` on `main`:
+On a branch from an up-to-date `main`, edit `.claude-plugin/plugin.json`:
 
 | File | Field | Example |
 |---|---|---|
@@ -29,23 +30,33 @@ Edit `.claude-plugin/plugin.json` on `main`:
 get, and you move it in [step 6](#6-pin-the-marketplace-to-the-new-release)
 after the release is out.
 
-### 2. Commit the bump
+### 2. Open the bump PR
 
 Regenerate `checksums.txt` so it matches the binaries this release will build,
-and commit it alongside the version bump.
+commit it alongside the version bump, and open a PR. `main` doesn't accept
+direct pushes, and the PR runs the `checksums up to date` check, which
+`build & test` requires: a bump with stale hashes can't merge.
 
 ```bash
 git checkout main && git pull origin main
+git checkout -b release/v0.4.0
 # edit plugin.json
 make checksums
 git add .claude-plugin/plugin.json checksums.txt
 git commit -m "chore(release): v0.4.0"
-git push origin main
+git push -u origin release/v0.4.0   # admins; otherwise push to your fork
+gh pr create --fill --repo fiddler-labs/fiddler-coding-agent-plugin --base main
 ```
+
+Without the admin role, open the PR from a fork; an admin then tags the merge
+commit in step 3. Squash-merge the PR once it's approved.
 
 ### 3. Tag and push
 
+Tag the merge commit on `main`:
+
 ```bash
+git checkout main && git pull origin main
 git tag v0.4.0
 git push origin v0.4.0
 ```
@@ -105,12 +116,13 @@ gh workflow run release-smoke.yml --repo fiddler-labs/fiddler-coding-agent-plugi
 ```
 
 Optionally verify the shim download path end-to-end in a fresh Claude Code
-session, or check one asset's checksum manually:
+session, or check one asset manually against the `checksums.txt` committed at
+the tag, which is what the shim checks (not the release's own copy):
 
 ```bash
 gh release download v0.4.0 --repo fiddler-labs/fiddler-coding-agent-plugin \
-  -p on-event-darwin-arm64 -p checksums.txt
-grep ' on-event-darwin-arm64$' checksums.txt | shasum -a 256 -c
+  -p on-event-darwin-arm64
+git show v0.4.0:checksums.txt | grep ' on-event-darwin-arm64$' | shasum -a 256 -c
 ```
 
 ### 6. Pin the marketplace to the new release
@@ -174,9 +186,9 @@ computes the local SHA-256, and refuses to install the binary if:
 - no `sha256sum` / `shasum` command is available, or
 - the computed hash does not match.
 
-The release workflow builds the binaries at the tag and fails before publishing
-if they do not match the committed `checksums.txt`, so a corrupted or tampered
-binary is never executed by the shim.
+The shim refuses any binary that does not match the committed `checksums.txt`.
+The release workflow also builds the binaries at the tag and refuses to publish
+if they do not match it.
 
 ## Binary download
 
@@ -204,15 +216,19 @@ version instead.
 git tag -d v0.4.0
 git push origin :refs/tags/v0.4.0
 
-# 2. Fix the version in plugin.json (make it match the intended version),
-#    and remove any "version" from the marketplace.json entry
+# 2. On a branch, fix the version in plugin.json (make it match the intended
+#    version), and remove any "version" from the marketplace.json entry
+git checkout main && git pull origin main
+git checkout -b fix/release-v0.4.0
 
-# 3. Commit and push
+# 3. Commit, push the branch and open a PR (main doesn't accept direct pushes)
 git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
 git commit -m "fix(release): align versions to 0.4.0"
-git push origin main
+git push -u origin fix/release-v0.4.0   # admins; otherwise push to your fork
+gh pr create --fill --repo fiddler-labs/fiddler-coding-agent-plugin --base main
 
-# 4. Re-tag and push
+# 4. After the PR merges, re-tag the merge commit and push
+git checkout main && git pull origin main
 git tag v0.4.0
 git push origin v0.4.0
 ```

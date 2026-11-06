@@ -53,21 +53,23 @@ jobs:
       - run: go vet ./...
       - run: go test ${{ matrix.race }} ./...
 
-  # CI gate over the OS matrix: one stable result that passes only when every
-  # platform passed, so adding or removing a platform doesn't change which
-  # checks a merge waits on.
+  # CI gate over the OS matrix and the checksum check: one stable result that
+  # passes only when every platform passed and the checksum check passed or was
+  # skipped (it runs only on PRs, so it is skipped on tag pushes). Adding or
+  # removing a platform doesn't change which checks a merge waits on.
   build-and-test:
     name: build & test
-    needs: [test]
+    needs: [test, checksums]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: All platforms passed
+      - name: All platforms and the checksum check passed
         env:
-          RESULT: ${{ needs.test.result }}
+          TEST: ${{ needs.test.result }}
+          CHECKSUMS: ${{ needs.checksums.result }}
         run: |
-          echo "test matrix result: ${RESULT}"
-          [ "${RESULT}" = "success" ]
+          echo "test=${TEST} checksums=${CHECKSUMS}"
+          [ "${TEST}" = "success" ] && { [ "${CHECKSUMS}" = "success" ] || [ "${CHECKSUMS}" = "skipped" ]; }
 
   lint:
     name: lint & format
@@ -143,7 +145,9 @@ jobs:
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          version: "~> v2"
+          # Keep in sync with release.yml, so this check builds with the same
+          # GoReleaser the release does.
+          version: v2.20.0
           args: release --snapshot --clean
       - name: Verify committed checksums match a fresh build
         if: steps.changed.outputs.run == 'true'
